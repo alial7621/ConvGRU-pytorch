@@ -2,7 +2,7 @@
 **[This](https://github.com/happyjin/ConvGRU-pytorch/blob/master/convGRU.py)** file **contains 
 the implementation of Convolutional LSTM in PyTorch**
 
-** ---In this version there is no need to add input_size and dtype as arguments to the model---**
+**--- In this version there is no need to add input_size and dtype as arguments to the model ---**
 
 ### How to Use
 The `ConvGRU` module derives from `nn.Module` so it can be used as any other PyTorch module.
