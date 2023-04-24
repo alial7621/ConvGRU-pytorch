@@ -2,6 +2,8 @@
 **[This](https://github.com/happyjin/ConvGRU-pytorch/blob/master/convGRU.py)** file **contains 
 the implementation of Convolutional LSTM in PyTorch**
 
+** ---In this version there is no need to add input_size and dtype as arguments to the model---**
+
 ### How to Use
 The `ConvGRU` module derives from `nn.Module` so it can be used as any other PyTorch module.
 
@@ -13,29 +15,24 @@ snippet each of the three layers has a different hidden dimension but the same k
 Example usage:
 ```
 # set CUDA device
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
-# detect if CUDA is available or not
-use_gpu = torch.cuda.is_available()
-if use_gpu:
-    dtype = torch.cuda.FloatTensor # computation in GPU
-else:
-    dtype = torch.FloatTensor
-
-height = width = 6
 channels = 256
 hidden_dim = [32, 64]
-kernel_size = (3,3) # for two stacked hidden layers with same kernel_size or write as [(3,3), (3,3)]
+kernel_size = (3,3) # kernel size for two stacked hidden layer
 num_layers = 2 # number of stacked hidden layer
-model = ConvGRU(input_size=(height, width),
-                input_dim=channels,
+model = ConvGRU(input_dim=channels,
                 hidden_dim=hidden_dim,
                 kernel_size=kernel_size,
                 num_layers=num_layers,
-                dtype=dtype,
                 batch_first=True,
                 bias = True,
-                return_all_layers = False)
+                return_all_layers = False,
+                padding=0)
+
+# detect if CUDA is available or not
+if torch.cuda.is_available():
+    model.to('cuda:0') # computation in GPU
 
 batch_size = 1
 time_steps = 1
