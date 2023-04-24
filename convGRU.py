@@ -5,11 +5,9 @@ from torch.autograd import Variable
 
 
 class ConvGRUCell(nn.Module):
-    def __init__(self, input_size, input_dim, hidden_dim, kernel_size, bias, dtype):
+    def __init__(self, input_dim, hidden_dim, kernel_size, bias, padding):
         """
         Initialize the ConvLSTM cell
-        :param input_size: (int, int)
-            Height and width of input tensor as (height, width).
         :param input_dim: int
             Number of channels of input tensor.
         :param hidden_dim: int
@@ -18,15 +16,11 @@ class ConvGRUCell(nn.Module):
             Size of the convolutional kernel.
         :param bias: bool
             Whether or not to add the bias.
-        :param dtype: torch.cuda.FloatTensor or torch.FloatTensor
-            Whether or not to use cuda.
         """
         super(ConvGRUCell, self).__init__()
-        self.height, self.width = input_size
-        self.padding = kernel_size[0] // 2, kernel_size[1] // 2
+        self.padding = padding
         self.hidden_dim = hidden_dim
         self.bias = bias
-        self.dtype = dtype
 
         self.conv_gates = nn.Conv2d(in_channels=input_dim + hidden_dim,
                                     out_channels=2*self.hidden_dim,  # for update_gate,reset_gate respectively
@@ -40,8 +34,9 @@ class ConvGRUCell(nn.Module):
                               padding=self.padding,
                               bias=self.bias)
 
-    def init_hidden(self, batch_size):
-        return (Variable(torch.zeros(batch_size, self.hidden_dim, self.height, self.width)).type(self.dtype))
+    def init_hidden(self, batch_size, image_size):
+        height, width = image_size
+        return (Variable(torch.zeros(batch_size, self.hidden_dim, height, width, device=self.conv_gates.weight.device)))
 
     def forward(self, input_tensor, h_cur):
         """
@@ -70,12 +65,10 @@ class ConvGRUCell(nn.Module):
 
 
 class ConvGRU(nn.Module):
-    def __init__(self, input_size, input_dim, hidden_dim, kernel_size, num_layers,
-                 dtype, batch_first=False, bias=True, return_all_layers=False):
+    def __init__(self, input_dim, hidden_dim, kernel_size, num_layers,
+                 batch_first=False, bias=True, return_all_layers=False, padding=0):
         """
 
-        :param input_size: (int, int)
-            Height and width of input tensor as (height, width).
         :param input_dim: int e.g. 256
             Number of channels of input tensor.
         :param hidden_dim: int e.g. 1024
@@ -84,16 +77,14 @@ class ConvGRU(nn.Module):
             Size of the convolutional kernel.
         :param num_layers: int
             Number of ConvLSTM layers
-        :param dtype: torch.cuda.FloatTensor or torch.FloatTensor
-            Whether or not to use cuda.
-        :param alexnet_path: str
-            pretrained alexnet parameters
         :param batch_first: bool
             if the first position of array is batch or not
         :param bias: bool
             Whether or not to add the bias.
         :param return_all_layers: bool
             if return hidden and cell states for all layers
+        :param padding: int
+            expand the input for convolution layer
         """
         super(ConvGRU, self).__init__()
 
@@ -103,25 +94,23 @@ class ConvGRU(nn.Module):
         if not len(kernel_size) == len(hidden_dim) == num_layers:
             raise ValueError('Inconsistent list length.')
 
-        self.height, self.width = input_size
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.kernel_size = kernel_size
-        self.dtype = dtype
         self.num_layers = num_layers
         self.batch_first = batch_first
         self.bias = bias
         self.return_all_layers = return_all_layers
+        self.padding = padding
 
         cell_list = []
         for i in range(0, self.num_layers):
             cur_input_dim = input_dim if i == 0 else hidden_dim[i - 1]
-            cell_list.append(ConvGRUCell(input_size=(self.height, self.width),
-                                         input_dim=cur_input_dim,
+            cell_list.append(ConvGRUCell(input_dim=cur_input_dim,
                                          hidden_dim=self.hidden_dim[i],
                                          kernel_size=self.kernel_size[i],
                                          bias=self.bias,
-                                         dtype=self.dtype))
+                                         padding=self.padding))
 
         # convert python list to pytorch module
         self.cell_list = nn.ModuleList(cell_list)
@@ -137,12 +126,14 @@ class ConvGRU(nn.Module):
         if not self.batch_first:
             # (t, b, c, h, w) -> (b, t, c, h, w)
             input_tensor = input_tensor.permute(1, 0, 2, 3, 4)
-
+        
+        batch_size, _, _, height, width = input_tensor.size()
         # Implement stateful ConvLSTM
         if hidden_state is not None:
             raise NotImplementedError()
         else:
-            hidden_state = self._init_hidden(batch_size=input_tensor.size(0))
+            hidden_state = self._init_hidden(batch_size=batch_size,
+                                             image_size=(height, width))
 
         layer_output_list = []
         last_state_list   = []
@@ -171,10 +162,10 @@ class ConvGRU(nn.Module):
 
         return layer_output_list, last_state_list
 
-    def _init_hidden(self, batch_size):
+    def _init_hidden(self, batch_size, image_size):
         init_states = []
         for i in range(self.num_layers):
-            init_states.append(self.cell_list[i].init_hidden(batch_size))
+            init_states.append(self.cell_list[i].init_hidden(batch_size, image_size))
         return init_states
 
     @staticmethod
@@ -191,30 +182,23 @@ class ConvGRU(nn.Module):
 
 
 if __name__ == '__main__':
-    # set CUDA device
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
-    # detect if CUDA is available or not
-    use_gpu = torch.cuda.is_available()
-    if use_gpu:
-        dtype = torch.cuda.FloatTensor # computation in GPU
-    else:
-        dtype = torch.FloatTensor
-
-    height = width = 6
     channels = 256
     hidden_dim = [32, 64]
     kernel_size = (3,3) # kernel size for two stacked hidden layer
     num_layers = 2 # number of stacked hidden layer
-    model = ConvGRU(input_size=(height, width),
-                    input_dim=channels,
+    model = ConvGRU(input_dim=channels,
                     hidden_dim=hidden_dim,
                     kernel_size=kernel_size,
                     num_layers=num_layers,
-                    dtype=dtype,
                     batch_first=True,
                     bias = True,
-                    return_all_layers = False)
+                    return_all_layers = False,
+                    padding=0)
+
+    # detect if CUDA is available or not
+    if torch.cuda.is_available():
+        model.to('cuda:0') # computation in GPU
 
     batch_size = 1
     time_steps = 1
